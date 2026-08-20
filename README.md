@@ -17,6 +17,7 @@ A single-user ToDo list SPA that performs all CRUD without any page reload or na
   - [必要環境](#必要環境)
   - [セットアップ A: Docker（推奨）](#セットアップ-a-docker推奨)
   - [セットアップ B: XAMPP / WAMP（ローカル）](#セットアップ-b-xampp--wampローカル)
+  - [セットアップ C: Railway へのデプロイ（本番デモ）](#セットアップ-c-railway-へのデプロイ本番デモ)
   - [テスト実行](#テスト実行)
   - [API エンドポイント](#api-エンドポイント)
   - [データベーススキーマ](#データベーススキーマ)
@@ -150,6 +151,45 @@ php artisan serve
 ブラウザで **http://localhost:8000** を開きます。
 
 > Apache（`http://localhost/...`）ではなく、`php artisan serve` の利用を推奨します（設定が最小で確実です）。Apache で配信する場合はドキュメントルートを本プロジェクトの `public/` ディレクトリに向けてください。
+
+---
+
+## セットアップ C: Railway へのデプロイ（本番デモ）
+本リポジトリは Railway 上に Docker でそのままデプロイできます。`railway.json` と `Dockerfile` を同梱済みです。
+
+### 手順 1. MySQL サービスを追加
+1. [Railway](https://railway.app) で **New Project** → **Deploy from GitHub repo** から本リポジトリを選択。
+2. 同じプロジェクト内で **+ New** → **Database** → **Add MySQL** を追加。
+
+### 手順 2. アプリキーを生成
+ローカルで以下を実行し、出力された `base64:...` をコピーします。
+```bash
+php artisan key:generate --show
+```
+
+### 手順 3. 環境変数を設定
+アプリ側サービスの **Variables** に以下を設定します。
+
+| 変数 | 値 | 説明 |
+|------|-----|------|
+| `APP_KEY` | `base64:...`（手順 2 の値） | 固定しないとデプロイ毎にセッションが無効化される |
+| `APP_ENV` | `production` | |
+| `APP_DEBUG` | `false` | **本番では必須**（スタックトレース露出の防止） |
+| `APP_URL` | `https://<発行されたドメイン>` | |
+| `DB_CONNECTION` | `mysql` | |
+| `DB_URL` | `${{MySQL.MYSQL_URL}}` | MySQL サービスへの参照。Laravel が `DB_URL` を解釈する |
+| `LOG_CHANNEL` | `stderr` | Railway のログ画面に出力を流すため |
+
+> `DB_URL` は Railway の変数参照構文です。MySQL サービス名が `MySQL` 以外の場合は読み替えてください。
+
+### 手順 4. 公開ドメインを発行
+アプリ側サービスの **Settings** → **Networking** → **Generate Domain** を実行します。発行された URL を `APP_URL` に設定し直してください。
+
+### 動作の仕組み
+- Railway は `$PORT` を動的に割り当てるため、`entrypoint.sh` が nginx の待ち受けポートを起動時に置換します。
+- 起動時に自動でマイグレーションとシードが実行されます（シーダーは冪等なので再デプロイしても重複しません）。
+- ヘルスチェックは `/up`（Laravel 標準）を使用します。
+- TLS は Railway 側で終端されるため、`trustProxies` を有効化して HTTPS を正しく認識させています。
 
 ---
 
@@ -338,6 +378,45 @@ php artisan serve
 Open **http://localhost:8000** in your browser.
 
 > Using `php artisan serve` is recommended over Apache (`http://localhost/...`) — minimal, reliable config. If you prefer Apache, point the document root at this project's `public/` directory.
+
+---
+
+## Setup C: Deploying to Railway (live demo)
+This repository deploys to Railway as-is via Docker; `railway.json` and the `Dockerfile` are included.
+
+### Step 1. Add the app and a MySQL service
+1. On [Railway](https://railway.app), choose **New Project** → **Deploy from GitHub repo** and select this repository.
+2. In the same project, add **+ New** → **Database** → **Add MySQL**.
+
+### Step 2. Generate an application key
+Run this locally and copy the resulting `base64:...` value:
+```bash
+php artisan key:generate --show
+```
+
+### Step 3. Set environment variables
+Set the following under the app service's **Variables** tab.
+
+| Variable | Value | Why |
+|----------|-------|-----|
+| `APP_KEY` | `base64:...` (from step 2) | Must be fixed, or sessions break on every deploy |
+| `APP_ENV` | `production` | |
+| `APP_DEBUG` | `false` | **Required in production** (prevents leaking stack traces) |
+| `APP_URL` | `https://<your-generated-domain>` | |
+| `DB_CONNECTION` | `mysql` | |
+| `DB_URL` | `${{MySQL.MYSQL_URL}}` | Reference to the MySQL service; Laravel parses `DB_URL` natively |
+| `LOG_CHANNEL` | `stderr` | So logs appear in Railway's log viewer |
+
+> `DB_URL` uses Railway's variable-reference syntax. Adjust the name if your MySQL service isn't called `MySQL`.
+
+### Step 4. Generate a public domain
+Go to the app service's **Settings** → **Networking** → **Generate Domain**, then update `APP_URL` with the issued URL.
+
+### How it works
+- Railway assigns `$PORT` dynamically, so `entrypoint.sh` rewrites the nginx listening port at start-up.
+- Migrations and seeding run automatically on boot (the seeder is idempotent, so redeploys never duplicate rows).
+- The healthcheck uses `/up` (Laravel's built-in endpoint).
+- Railway terminates TLS at its proxy, so `trustProxies` is enabled to detect HTTPS correctly.
 
 ---
 
