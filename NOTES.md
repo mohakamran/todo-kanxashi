@@ -15,6 +15,8 @@ The Japanese section is followed by an equivalent English section.
 - **マスアサインメント対策**: `Todo` モデルに `$fillable` を明示し、`create()`/`update()` には `validated()` の値のみを渡す。
 - **XSS 対策**: フロントは `innerHTML` を使わず `textContent` で描画。Blade も既定でエスケープ。
 - **SQL インジェクション対策**: DB アクセスは Eloquent のみ（パラメータバインド）。生 SQL は不使用。
+- **セキュリティヘッダー**: `SecurityHeaders` ミドルウェアで `X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy` を全レスポンスに付与。
+- **入力サイズ制限**: `description` を最大 5000 文字に制限し、過大なペイロードを防ぐ。
 - **本番向け設定**: Nginx で `.env` などの隠しファイルへのアクセスを拒否。デプロイ時は `APP_DEBUG=false` を想定。
 
 ### 保守性 (Maintainability)
@@ -66,6 +68,8 @@ The Japanese section is followed by an equivalent English section.
 - **Mass assignment**: `Todo` declares an explicit `$fillable`, and only `validated()` input reaches `create()`/`update()`.
 - **XSS**: the frontend renders with `textContent` (never `innerHTML`); Blade escapes by default.
 - **SQL injection**: all DB access is Eloquent (parameter-bound); no raw SQL.
+- **Security headers**: a `SecurityHeaders` middleware adds `X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy` to every response.
+- **Input size limit**: `description` is capped at 5000 characters to guard against oversized payloads.
 - **Production hygiene**: Nginx denies access to hidden files such as `.env`; `APP_DEBUG=false` is expected in deployment.
 
 ### Maintainability

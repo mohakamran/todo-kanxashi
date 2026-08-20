@@ -54,6 +54,38 @@ class TodoApiTest extends TestCase
             ->assertJsonValidationErrors('title');
     }
 
+    // 256 文字以上の title は 422 になる。
+    // A title of 256+ characters yields 422.
+    public function test_store_rejects_overlong_title(): void
+    {
+        $response = $this->postJson('/api/todos', ['title' => str_repeat('a', 256)]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors('title');
+    }
+
+    // 5000 文字を超える description は 422 になる（過大ペイロード対策）。
+    // A description over 5000 characters yields 422 (oversized-payload guard).
+    public function test_store_rejects_overlong_description(): void
+    {
+        $response = $this->postJson('/api/todos', [
+            'title' => 'ok',
+            'description' => str_repeat('a', 5001),
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors('description');
+    }
+
+    // description は省略可能で、null として保存できる。
+    // description is optional and may be stored as null.
+    public function test_store_allows_null_description(): void
+    {
+        $this->postJson('/api/todos', ['title' => 'No description'])
+            ->assertCreated()
+            ->assertJsonPath('data.description', null);
+    }
+
     // 更新で title / description が変更できる。
     // Update changes title / description.
     public function test_update_modifies_todo(): void
@@ -103,5 +135,25 @@ class TodoApiTest extends TestCase
         $this->getJson('/api/todos'); // warm up
         $this->putJson('/api/todos/999', ['title' => 'x'])
             ->assertNotFound();
+    }
+
+    // トップページが 200 で表示され、CSRF トークンの meta を含む。
+    // The root page renders with 200 and includes the CSRF token meta tag.
+    public function test_home_page_renders(): void
+    {
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('csrf-token', false);
+    }
+
+    // すべてのレスポンスにセキュリティヘッダーが付与される。
+    // Security headers are attached to every response.
+    public function test_security_headers_are_present(): void
+    {
+        $response = $this->get('/');
+
+        $response->assertHeader('X-Frame-Options', 'SAMEORIGIN');
+        $response->assertHeader('X-Content-Type-Options', 'nosniff');
+        $response->assertHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     }
 }

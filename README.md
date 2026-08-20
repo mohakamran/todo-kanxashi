@@ -49,11 +49,14 @@ A single-user ToDo list SPA that performs all CRUD without any page reload or na
 ## 機能
 - ページ読み込み時に保存済み ToDo を一覧表示（Ajax 取得）
 - ToDo の作成（タイトル必須・説明任意）
-- ToDo の編集（インライン編集フォーム）
-- ToDo の削除（確認ダイアログ付き）
-- 完了状態のトグル
+- ToDo の編集（上部フォームに読み込み、ボタンが「追加」→「保存」に切替、「破棄」で取消）
+- ToDo の削除（プロフェッショナルな確認モーダル。Esc/Enter・フォーカス対応）
+- 完了状態のトグル（カスタムチェックボックス）
 - すべてページ遷移・リロードなし
+- 未完了件数のライブカウンター、控えめなアニメーション
 - バリデーションエラー（422）とネットワークエラーの画面表示
+- レスポンシブ対応、ライト/ダークテーマ（OS 設定に追従）
+- セキュリティヘッダー付与（クリックジャッキング/MIME スニッフィング対策）
 - UI ラベル・コードコメント・本 README は日英併記
 
 ## 必要環境
@@ -184,13 +187,15 @@ app/Http/Controllers/TodoController.php         リソースコントローラ�
 app/Http/Requests/StoreTodoRequest.php          作成用バリデーション
 app/Http/Requests/UpdateTodoRequest.php         更新用バリデーション
 app/Http/Resources/TodoResource.php             JSON 出力の整形
+app/Http/Middleware/SecurityHeaders.php         セキュリティヘッダー付与
 database/migrations/..._create_todos_table.php  スキーマ定義（唯一の情報源）
 database/seeders/TodoSeeder.php                 サンプルデータ
 routes/web.php                                  ルート定義（web ミドルウェア + CSRF）
 resources/views/todos.blade.php                 単一の Blade ビュー
 public/js/app.js                                fetch による CRUD（リロードなし）
-public/css/app.css                              最小限のスタイル
+public/css/app.css                              スタイル（レスポンシブ・ダーク対応）
 tests/Feature/TodoApiTest.php                   API のフィーチャーテスト
+tests/Unit/TodoModelTest.php                    モデルの単体テスト
 Dockerfile / docker-compose.yml                 Docker 構成
 docker/                                         nginx / supervisor / entrypoint
 ```
@@ -232,11 +237,14 @@ Request flow:
 ## Features
 - Displays saved ToDos on load (fetched via Ajax)
 - Create a ToDo (title required, description optional)
-- Edit a ToDo (inline edit form)
-- Delete a ToDo (with a confirmation dialog)
-- Toggle completion state
+- Edit a ToDo (loaded into the top form; the button switches Add → Save, with a Discard option)
+- Delete a ToDo (professional confirmation modal with Esc/Enter and focus handling)
+- Toggle completion state (custom checkbox)
 - Everything without page reload / navigation
+- Live counter of active tasks, subtle animations
 - Validation (422) and network errors shown in the UI
+- Responsive layout, light/dark theme (follows OS setting)
+- Security headers (clickjacking / MIME-sniffing protection)
 - Bilingual (Japanese + English) UI labels, code comments, and this README
 
 ## Requirements
@@ -367,13 +375,15 @@ app/Http/Controllers/TodoController.php         Resource controller (thin method
 app/Http/Requests/StoreTodoRequest.php          Create validation
 app/Http/Requests/UpdateTodoRequest.php         Update validation
 app/Http/Resources/TodoResource.php             JSON output shaping
+app/Http/Middleware/SecurityHeaders.php         Adds security headers
 database/migrations/..._create_todos_table.php  Schema definition (source of truth)
 database/seeders/TodoSeeder.php                 Sample data
 routes/web.php                                  Routes (web middleware + CSRF)
 resources/views/todos.blade.php                 The single Blade view
 public/js/app.js                                fetch-based CRUD (no reload)
-public/css/app.css                              Minimal styling
+public/css/app.css                              Styling (responsive, dark-mode)
 tests/Feature/TodoApiTest.php                   API feature tests
+tests/Unit/TodoModelTest.php                    Model unit tests
 Dockerfile / docker-compose.yml                 Docker setup
 docker/                                         nginx / supervisor / entrypoint
 ```

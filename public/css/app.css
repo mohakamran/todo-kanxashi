@@ -399,6 +399,13 @@ body {
     z-index: 50;
     padding: 1rem;
 }
+/*
+ * 重要: display を指定する .modal は UA の [hidden]{display:none} を上書きしてしまう。
+ * IMPORTANT: the display on .modal overrides the UA rule [hidden]{display:none}.
+ * これを明示的に復元しないと、非表示のはずのオーバーレイが全面に残りクリックを奪う。
+ * Without restoring this explicitly, the "hidden" overlay stays on top and swallows all clicks.
+ */
+.modal[hidden] { display: none; }
 .modal__overlay {
     position: absolute;
     inset: 0;
