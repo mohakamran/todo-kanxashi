@@ -152,33 +152,68 @@
         checkbox.checked = todo.is_completed;
         li.classList.toggle('todo--completed', todo.is_completed);
 
-        // イベント結線 / wire events
-        checkbox.addEventListener('change', () => toggleTodo(todo.id));
-        li.querySelector('.js-edit').addEventListener('click', () => enterEditMode(todo.id));
-        li.querySelector('.js-delete').addEventListener('click', () => openDeleteModal(todo.id));
-
+        // 個別のイベント結線は行わない。クリック/変更は <ul> 側の委譲で処理する。
+        // No per-item listeners here: clicks/changes are handled by delegation on the <ul>.
         return li;
     }
 
-    // 状態（Map）から一覧を再描画する。
-    // Re-render the whole list from state (the Map).
-    function renderList() {
-        const todos = [...state.todos.values()].sort((a, b) => b.id - a.id);
-        els.list.replaceChildren();
-        todos.forEach((todo) => els.list.appendChild(createTodoElement(todo)));
-        els.emptyState.hidden = todos.length > 0;
-        updateCounter();
+    // 指定 ID の <li> を取得する。
+    // Look up the <li> for a given id.
+    function findNode(id) {
+        return els.list.querySelector(`.todo[data-id="${id}"]`);
     }
 
-    // 未完了件数のカウンターを更新する。
-    // Update the "remaining/active" counter.
-    function updateCounter() {
+    // 一覧全体を描画する（初期ロード用）。
+    // Render the entire list (used for the initial load).
+    function renderList() {
+        const todos = [...state.todos.values()].sort((a, b) => b.id - a.id);
+        // DocumentFragment にまとめてから一度だけ挿入し、レイアウトの再計算を最小化する。
+        // Build into a DocumentFragment and insert once to minimize layout thrashing.
+        const frag = document.createDocumentFragment();
+        todos.forEach((todo) => frag.appendChild(createTodoElement(todo)));
+        els.list.replaceChildren(frag);
+        syncListChrome();
+    }
+
+    /**
+     * 1 件だけを差分更新する（全再描画を避ける）。
+     * Update a single item in place, avoiding a full re-render.
+     * 既存ノードがあれば置換し、無ければ（新規作成時）先頭に挿入する。
+     * Replaces the existing node, or prepends it when the item is new.
+     */
+    function upsertTodoNode(todo) {
+        const existing = findNode(todo.id);
+        const node = createTodoElement(todo);
+
+        if (existing) {
+            existing.replaceWith(node);
+        } else {
+            // 一覧は ID 降順のため、新規作成は常に先頭になる。
+            // The list is sorted by id descending, so a new item always goes first.
+            els.list.prepend(node);
+        }
+        syncListChrome();
+        return node;
+    }
+
+    // 1 件を DOM と状態から取り除く。
+    // Remove a single item from the DOM and from state.
+    function removeTodoNode(id) {
+        findNode(id)?.remove();
+        syncListChrome();
+    }
+
+    // 空状態表示とカウンターを現在の状態に同期する。
+    // Sync the empty-state message and the counter with the current state.
+    function syncListChrome() {
         const todos = [...state.todos.values()];
+        els.emptyState.hidden = todos.length > 0;
+
         if (todos.length === 0) {
             els.counter.textContent = '';
             return;
         }
-        const active = todos.filter((t) => !t.is_completed).length;
+        const active = todos.filter((t) => ! t.is_completed).length;
         els.counter.textContent = `未完了 ${active} / ${todos.length} 件  ·  ${active} of ${todos.length} active`;
     }
 
@@ -300,13 +335,13 @@
                 return;
             }
 
-            // 状態を更新して再描画。編集後はフォームを追加モードに戻す。
-            // Update state and re-render. After editing, reset the form to add mode.
+            // 状態を更新し、該当の 1 件だけを差分描画する。編集後はフォームを追加モードに戻す。
+            // Update state and re-render only the affected item. After editing, reset the form to add mode.
             const saved = data.data;
             state.todos.set(saved.id, saved);
-            const newlyCreated = !editing;
+            const newlyCreated = ! editing;
             resetForm();
-            renderList();
+            upsertTodoNode(saved);
 
             if (newlyCreated) {
                 flashItem(saved.id);
@@ -323,18 +358,23 @@
     // Toggle completion.
     async function toggleTodo(id) {
         clearGlobalError();
+        const known = state.todos.get(id);
+        if (! known) return;
+
         try {
             const { ok, data } = await apiRequest('PATCH', `${API_BASE}/${id}/complete`);
-            if (!ok) {
+            if (! ok) {
                 showGlobalError('状態の更新に失敗しました。 / Failed to update status.');
-                renderList(); // チェックボックスの見た目を状態に戻す / revert checkbox to state
+                // 保持している状態から該当行を描き直し、チェックボックスの見た目を戻す。
+                // Repaint the row from the state we hold, reverting the checkbox.
+                upsertTodoNode(known);
                 return;
             }
             state.todos.set(data.data.id, data.data);
-            renderList();
+            upsertTodoNode(data.data);
         } catch (err) {
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
-            renderList();
+            upsertTodoNode(known);
         }
     }
 
@@ -394,7 +434,7 @@
             // 削除対象を編集中だった場合はフォームを戻す。
             // If we were editing the deleted item, reset the form.
             if (state.editingId === id) resetForm();
-            renderList();
+            removeTodoNode(id);
             closeDeleteModal();
         } catch (err) {
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
@@ -420,9 +460,39 @@
     // 初期化 / initialization
     // -------------------------------------------------------------------------
 
+    /**
+     * 一覧のイベントを <ul> 1 箇所で受け取る（イベント委譲）。
+     * Handle all list events with a single listener on the <ul> (event delegation).
+     * 行を再描画してもリスナーを貼り直す必要がなく、リスナー数も常に一定に保てる。
+     * Rows can be re-rendered without re-binding, and the listener count stays constant.
+     */
+    function wireListDelegation() {
+        // 編集・削除ボタンのクリック / clicks on the edit & delete buttons
+        els.list.addEventListener('click', (event) => {
+            const button = event.target.closest('.js-edit, .js-delete');
+            if (! button) return;
+
+            const id = Number(button.closest('.todo').dataset.id);
+            if (button.classList.contains('js-edit')) {
+                enterEditMode(id);
+            } else {
+                openDeleteModal(id);
+            }
+        });
+
+        // 完了トグルの変更 / changes on the completion toggle
+        els.list.addEventListener('change', (event) => {
+            const checkbox = event.target.closest('.js-toggle');
+            if (! checkbox) return;
+
+            toggleTodo(Number(checkbox.closest('.todo').dataset.id));
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         els.form.addEventListener('submit', handleSubmit);
         els.discardBtn.addEventListener('click', resetForm);
+        wireListDelegation();
 
         // モーダルの各操作 / modal interactions
         els.modalCancel.addEventListener('click', closeDeleteModal);
