@@ -34,9 +34,13 @@ RUN composer install --no-interaction --no-dev --no-scripts --prefer-dist --no-p
 # Copy the application source.
 COPY . .
 
-# オートローダーを最適化し、パッケージを discover する。
-# Optimize the autoloader and run package discovery.
-RUN composer dump-autoload --optimize \
+# オートローダーを最適化する。
+# Optimize the autoloader.
+# ビルド時点では .env / APP_KEY が無いため、artisan を起動する composer スクリプトは実行しない（--no-scripts）。
+# At build time there is no .env / APP_KEY yet, so skip composer scripts that boot artisan (--no-scripts).
+# パッケージ discover は失敗しても続行できるよう `|| true` で保護する。
+# Guard package discovery with `|| true` so the build proceeds even if it cannot boot.
+RUN composer dump-autoload --optimize --no-scripts \
     && php artisan package:discover --ansi || true
 
 # storage / bootstrap/cache に書き込み権限を与える。

@@ -11,10 +11,6 @@ class TodoSeeder extends Seeder
 {
     public function run(): void
     {
-        // 冪等性のため既存データを一旦クリアしてから投入する。
-        // Clear existing rows first so re-seeding stays idempotent.
-        Todo::query()->delete();
-
         $samples = [
             [
                 'title' => '牛乳を買う / Buy milk',
@@ -33,8 +29,15 @@ class TodoSeeder extends Seeder
             ],
         ];
 
+        // title をキーに firstOrCreate で投入する。
+        // Insert with firstOrCreate keyed on title.
+        // これにより再シードしても重複せず、ユーザーが作成した ToDo も消さない（非破壊・冪等）。
+        // This way re-seeding never duplicates rows and never wipes user-created ToDos (non-destructive & idempotent).
         foreach ($samples as $sample) {
-            Todo::create($sample);
+            Todo::firstOrCreate(
+                ['title' => $sample['title']],
+                $sample
+            );
         }
     }
 }

@@ -9,5 +9,10 @@ storage/logs/*
 storage/framework/cache/data/*
 storage/framework/sessions/*
 storage/framework/views/*
+# ホストのキャッシュ済み設定/ルートをイメージに持ち込まない（env を上書きしてしまうため）。
+# Never bake the host's cached config/routes into the image (they would override env).
+bootstrap/cache/*.php
+.phpunit.result.cache
+.phpunit.cache
 tests
 README.md
