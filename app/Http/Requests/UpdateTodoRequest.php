@@ -21,7 +21,9 @@ class UpdateTodoRequest extends FormRequest
     {
         return [
             'title' => ['required', 'string', 'max:255'],
-            'description' => ['nullable', 'string'],
+            // 過大なペイロードを防ぐため説明にも上限を設ける。
+            // Cap the description too, to guard against oversized payloads.
+            'description' => ['nullable', 'string', 'max:5000'],
         ];
     }
 
@@ -34,6 +36,7 @@ class UpdateTodoRequest extends FormRequest
             'title.max' => 'タイトルは255文字以内で入力してください。 / Title must be 255 characters or fewer.',
             'title.string' => 'タイトルは文字列で入力してください。 / Title must be a string.',
             'description.string' => '説明は文字列で入力してください。 / Description must be a string.',
+            'description.max' => '説明は5000文字以内で入力してください。 / Description must be 5000 characters or fewer.',
         ];
     }
 }

@@ -4,6 +4,12 @@
  *
  * すべての CRUD を fetch (Ajax) で行い、ページ遷移・リロードなしに DOM を更新する。
  * All CRUD is done via fetch (Ajax); the DOM is updated in place with no navigation/reload.
+ *
+ * 主な UX:
+ *  - 追加/編集は上部の単一フォームで兼用（編集時はボタンが「保存」に変わり「破棄」を表示）。
+ *    A single top form handles both add and edit (in edit mode the button becomes "Save" and a "Discard" button appears).
+ *  - 削除は専用の確認モーダルで確認する。
+ *    Deletion is confirmed via a dedicated modal dialog.
  */
 (() => {
     'use strict';
@@ -19,15 +25,38 @@
     // よく使う DOM 要素をキャッシュする。
     // Cache frequently used DOM elements.
     const els = {
+        form: document.getElementById('todo-form'),
+        formCard: document.getElementById('form-card'),
+        formHeading: document.getElementById('form-heading'),
+        id: document.getElementById('todo-id'),
+        title: document.getElementById('form-title'),
+        description: document.getElementById('form-description'),
+        submitBtn: document.getElementById('submit-btn'),
+        discardBtn: document.getElementById('discard-btn'),
         list: document.getElementById('todo-list'),
         template: document.getElementById('todo-item-template'),
-        createForm: document.getElementById('create-form'),
-        createTitle: document.getElementById('create-title'),
-        createDescription: document.getElementById('create-description'),
         loading: document.getElementById('loading'),
         emptyState: document.getElementById('empty-state'),
         globalError: document.getElementById('global-error'),
+        counter: document.getElementById('counter'),
+        // モーダル / modal
+        modal: document.getElementById('delete-modal'),
+        modalTarget: document.getElementById('modal-target'),
+        modalCancel: document.getElementById('modal-cancel'),
+        modalConfirm: document.getElementById('modal-confirm'),
     };
+
+    // クライアント側の状態。id → todo のマップで最新データを保持する。
+    // Client-side state. A Map of id → todo keeps the latest data.
+    const state = {
+        todos: new Map(),
+        editingId: null, // 編集中の ID（null なら新規追加モード）/ id being edited (null = create mode)
+        deletingId: null, // 削除確認中の ID / id pending delete confirmation
+    };
+
+    // -------------------------------------------------------------------------
+    // 通信ヘルパー / networking helper
+    // -------------------------------------------------------------------------
 
     /**
      * fetch の薄いラッパー。JSON ヘッダーと CSRF トークンを付与し、
@@ -66,14 +95,10 @@
         return { ok: response.ok, status: response.status, data };
     }
 
-    /**
-     * ユーザー入力を安全に DOM へ挿入するため、textContent を使う。
-     * ここでは値をそのまま返し、呼び出し側で textContent 経由で設定する（XSS 対策）。
-     * We insert user input via textContent (never innerHTML) to prevent XSS.
-     */
+    // -------------------------------------------------------------------------
+    // エラー表示 / error display
+    // -------------------------------------------------------------------------
 
-    // グローバルエラーの表示 / 非表示。
-    // Show / hide the global error banner.
     function showGlobalError(message) {
         els.globalError.textContent = message;
         els.globalError.hidden = false;
@@ -82,38 +107,38 @@
         els.globalError.textContent = '';
         els.globalError.hidden = true;
     }
-
-    // フォーム内の項目別エラー表示をクリアする。
-    // Clear per-field error messages inside a form.
-    function clearFieldErrors(form) {
-        form.querySelectorAll('[data-error-for]').forEach((el) => {
+    function clearFieldErrors() {
+        els.form.querySelectorAll('[data-error-for]').forEach((el) => {
             el.textContent = '';
         });
     }
-
     // 422 のバリデーションエラーを各項目の下に表示する。
     // Render 422 validation errors under each field.
-    function applyValidationErrors(form, errors) {
-        clearFieldErrors(form);
+    function applyValidationErrors(errors) {
+        clearFieldErrors();
         Object.entries(errors || {}).forEach(([field, messages]) => {
-            const target = form.querySelector(`[data-error-for="${field}"]`);
+            const target = els.form.querySelector(`[data-error-for="${field}"]`);
             if (target && messages.length) {
                 target.textContent = messages[0];
             }
         });
     }
 
+    // -------------------------------------------------------------------------
+    // 描画 / rendering
+    // -------------------------------------------------------------------------
+
     /**
      * 1 件の ToDo を表す <li> を生成する。
      * Build the <li> element for a single ToDo.
+     * ユーザー入力は textContent で挿入するため XSS 安全。
+     * User input is inserted via textContent, so it is XSS-safe.
      */
     function createTodoElement(todo) {
         const fragment = els.template.content.cloneNode(true);
         const li = fragment.querySelector('.todo');
         li.dataset.id = todo.id;
 
-        // textContent を使うことでユーザー入力を安全に描画する。
-        // Using textContent renders user input safely (auto-escaped).
         li.querySelector('.js-title').textContent = todo.title;
 
         const descEl = li.querySelector('.js-description');
@@ -127,53 +152,101 @@
         checkbox.checked = todo.is_completed;
         li.classList.toggle('todo--completed', todo.is_completed);
 
-        wireItemEvents(li, todo);
+        // イベント結線 / wire events
+        checkbox.addEventListener('change', () => toggleTodo(todo.id));
+        li.querySelector('.js-edit').addEventListener('click', () => enterEditMode(todo.id));
+        li.querySelector('.js-delete').addEventListener('click', () => openDeleteModal(todo.id));
+
         return li;
     }
 
-    // 1 件の <li> にイベントハンドラを結び付ける。
-    // Attach event handlers for a single <li>.
-    function wireItemEvents(li, todo) {
-        const id = todo.id;
-
-        // 完了トグル / toggle completion
-        li.querySelector('.js-toggle').addEventListener('change', () => toggleTodo(id, li));
-
-        // 削除 / delete
-        li.querySelector('.js-delete').addEventListener('click', () => deleteTodo(id, li));
-
-        // 編集フォームの開閉 / open & close the edit form
-        const editForm = li.querySelector('.js-edit-form');
-        li.querySelector('.js-edit').addEventListener('click', () => openEditForm(li));
-        li.querySelector('.js-cancel').addEventListener('click', () => closeEditForm(li));
-
-        // 保存 / save
-        editForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            updateTodo(id, li);
-        });
+    // 状態（Map）から一覧を再描画する。
+    // Re-render the whole list from state (the Map).
+    function renderList() {
+        const todos = [...state.todos.values()].sort((a, b) => b.id - a.id);
+        els.list.replaceChildren();
+        todos.forEach((todo) => els.list.appendChild(createTodoElement(todo)));
+        els.emptyState.hidden = todos.length > 0;
+        updateCounter();
     }
 
-    // 編集フォームを開き、現在の値を流し込む。
-    // Open the edit form, pre-filling it with the current values.
-    function openEditForm(li) {
-        const titleText = li.querySelector('.js-title').textContent;
-        const descEl = li.querySelector('.js-description');
-        li.querySelector('.js-edit-title').value = titleText;
-        li.querySelector('.js-edit-description').value = descEl ? descEl.textContent : '';
-        li.querySelector('.js-edit-form').hidden = false;
+    // 未完了件数のカウンターを更新する。
+    // Update the "remaining/active" counter.
+    function updateCounter() {
+        const todos = [...state.todos.values()];
+        if (todos.length === 0) {
+            els.counter.textContent = '';
+            return;
+        }
+        const active = todos.filter((t) => !t.is_completed).length;
+        els.counter.textContent = `未完了 ${active} / ${todos.length} 件  ·  ${active} of ${todos.length} active`;
     }
 
-    function closeEditForm(li) {
-        const form = li.querySelector('.js-edit-form');
-        clearFieldErrors(form);
-        form.hidden = true;
+    // -------------------------------------------------------------------------
+    // フォームのモード切替（追加 ⇄ 編集）/ form mode switching (add ⇄ edit)
+    // -------------------------------------------------------------------------
+
+    // ボタン/見出しの日英ラベルを差し替えるヘルパー。
+    // Helper to swap the bilingual (JP/EN) labels on a button/heading.
+    function setBilingual(el, jp, en) {
+        el.querySelector('.jp').textContent = jp;
+        el.querySelector('.en').textContent = en;
     }
 
-    /**
-     * 一覧の初期読み込み。
-     * Initial load of the list.
-     */
+    // 指定 ID の ToDo を上部フォームに読み込み、編集モードに切り替える。
+    // Load the given ToDo into the top form and switch to edit mode.
+    function enterEditMode(id) {
+        const todo = state.todos.get(id);
+        if (!todo) return;
+
+        state.editingId = id;
+        els.id.value = id;
+        els.title.value = todo.title;
+        els.description.value = todo.description || '';
+
+        setBilingual(els.formHeading, 'タスクを編集', 'Edit Task');
+        setBilingual(els.submitBtn, '保存', 'Save');
+        els.discardBtn.hidden = false;
+        els.formCard.classList.add('card--editing');
+        clearFieldErrors();
+
+        // 該当アイテムを視覚的に強調し、フォームへスクロールする。
+        // Highlight the item being edited and scroll to the form.
+        highlightEditing(id);
+        els.formCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        els.title.focus();
+    }
+
+    // 編集モードを解除し、通常の追加フォームに戻す。
+    // Leave edit mode and reset back to the normal add form.
+    function resetForm() {
+        state.editingId = null;
+        els.form.reset();
+        els.id.value = '';
+        setBilingual(els.formHeading, '新しいタスク', 'New Task');
+        setBilingual(els.submitBtn, '追加', 'Add');
+        els.discardBtn.hidden = true;
+        els.formCard.classList.remove('card--editing');
+        clearFieldErrors();
+        highlightEditing(null);
+    }
+
+    // 編集中アイテムに強調クラスを付与する。
+    // Apply a highlight class to the item currently being edited.
+    function highlightEditing(id) {
+        els.list.querySelectorAll('.todo--editing').forEach((li) => li.classList.remove('todo--editing'));
+        if (id !== null) {
+            const li = els.list.querySelector(`.todo[data-id="${id}"]`);
+            if (li) li.classList.add('todo--editing');
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // CRUD 操作 / CRUD operations
+    // -------------------------------------------------------------------------
+
+    // 一覧の初期読み込み。
+    // Initial load of the list.
     async function loadTodos() {
         clearGlobalError();
         try {
@@ -185,144 +258,177 @@
                 return;
             }
 
-            const todos = data.data || [];
-            els.list.replaceChildren();
-            todos.forEach((todo) => els.list.appendChild(createTodoElement(todo)));
-            els.emptyState.hidden = todos.length > 0;
+            state.todos.clear();
+            (data.data || []).forEach((todo) => state.todos.set(todo.id, todo));
+            renderList();
         } catch (err) {
             els.loading.hidden = true;
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
         }
     }
 
-    /**
-     * 作成。成功したら一覧の先頭に追加する。
-     * Create. On success, prepend to the list.
-     */
-    async function createTodo(event) {
+    // フォーム送信: 編集モードなら更新、そうでなければ作成。
+    // Form submit: update in edit mode, otherwise create.
+    async function handleSubmit(event) {
         event.preventDefault();
         clearGlobalError();
-        clearFieldErrors(els.createForm);
+        clearFieldErrors();
 
         const payload = {
-            title: els.createTitle.value,
-            description: els.createDescription.value,
+            title: els.title.value,
+            description: els.description.value,
         };
 
+        const editing = state.editingId !== null;
+        const method = editing ? 'PUT' : 'POST';
+        const url = editing ? `${API_BASE}/${state.editingId}` : API_BASE;
+
+        // 二重送信防止 / prevent double submit
+        els.submitBtn.disabled = true;
+
         try {
-            const { ok, status, data } = await apiRequest('POST', API_BASE, payload);
+            const { ok, status, data } = await apiRequest(method, url, payload);
 
             if (status === 422) {
-                applyValidationErrors(els.createForm, data.errors);
+                applyValidationErrors(data.errors);
                 return;
             }
             if (!ok) {
-                showGlobalError('作成に失敗しました。 / Failed to create the task.');
+                showGlobalError(editing
+                    ? '更新に失敗しました。 / Failed to update the task.'
+                    : '作成に失敗しました。 / Failed to create the task.');
                 return;
             }
 
-            // 新しいアイテムを先頭に追加し、フォームをリセットする。
-            // Prepend the new item and reset the form.
-            els.list.prepend(createTodoElement(data.data));
-            els.emptyState.hidden = true;
-            els.createForm.reset();
-            els.createTitle.focus();
+            // 状態を更新して再描画。編集後はフォームを追加モードに戻す。
+            // Update state and re-render. After editing, reset the form to add mode.
+            const saved = data.data;
+            state.todos.set(saved.id, saved);
+            const newlyCreated = !editing;
+            resetForm();
+            renderList();
+
+            if (newlyCreated) {
+                flashItem(saved.id);
+                els.title.focus();
+            }
         } catch (err) {
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
+        } finally {
+            els.submitBtn.disabled = false;
         }
     }
 
-    /**
-     * 更新（title / description）。
-     * Update (title / description).
-     */
-    async function updateTodo(id, li) {
-        clearGlobalError();
-        const form = li.querySelector('.js-edit-form');
-        const payload = {
-            title: form.querySelector('.js-edit-title').value,
-            description: form.querySelector('.js-edit-description').value,
-        };
-
-        try {
-            const { ok, status, data } = await apiRequest('PUT', `${API_BASE}/${id}`, payload);
-
-            if (status === 422) {
-                applyValidationErrors(form, data.errors);
-                return;
-            }
-            if (!ok) {
-                showGlobalError('更新に失敗しました。 / Failed to update the task.');
-                return;
-            }
-
-            // 更新後の内容で置き換える。
-            // Replace the item with the updated content.
-            li.replaceWith(createTodoElement(data.data));
-        } catch (err) {
-            showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
-        }
-    }
-
-    /**
-     * 完了状態のトグル。
-     * Toggle completion.
-     */
-    async function toggleTodo(id, li) {
+    // 完了状態のトグル。
+    // Toggle completion.
+    async function toggleTodo(id) {
         clearGlobalError();
         try {
             const { ok, data } = await apiRequest('PATCH', `${API_BASE}/${id}/complete`);
-
             if (!ok) {
                 showGlobalError('状態の更新に失敗しました。 / Failed to update status.');
-                // 失敗時はチェックボックスの見た目を元に戻す。
-                // Revert the checkbox visual on failure.
-                const checkbox = li.querySelector('.js-toggle');
-                checkbox.checked = !checkbox.checked;
+                renderList(); // チェックボックスの見た目を状態に戻す / revert checkbox to state
                 return;
             }
-
-            li.replaceWith(createTodoElement(data.data));
+            state.todos.set(data.data.id, data.data);
+            renderList();
         } catch (err) {
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
-            const checkbox = li.querySelector('.js-toggle');
-            checkbox.checked = !checkbox.checked;
+            renderList();
         }
     }
 
-    /**
-     * 削除。成功したら DOM から取り除く。
-     * Delete. On success, remove from the DOM.
-     */
-    async function deleteTodo(id, li) {
-        clearGlobalError();
+    // -------------------------------------------------------------------------
+    // 削除モーダル / delete modal
+    // -------------------------------------------------------------------------
 
-        // 誤操作防止の確認（日英併記）。
-        // Confirmation to prevent accidental deletion (bilingual).
-        const confirmed = window.confirm('このタスクを削除しますか？ / Delete this task?');
-        if (!confirmed) {
-            return;
-        }
+    // 削除確認モーダルを開く。
+    // Open the delete confirmation modal.
+    function openDeleteModal(id) {
+        const todo = state.todos.get(id);
+        if (!todo) return;
+        state.deletingId = id;
+        els.modalTarget.textContent = todo.title; // textContent で安全 / safe via textContent
+        els.modal.hidden = false;
+        // 一度リフローを強制してから開クラスを付与し、確実に開始状態→表示状態のトランジションを再生する。
+        // Force a reflow before adding the open class so the enter transition reliably plays
+        // (does not depend on requestAnimationFrame, which can be throttled in background tabs).
+        void els.modal.offsetWidth;
+        els.modal.classList.add('modal--open');
+        els.modalCancel.focus();
+        document.addEventListener('keydown', onModalKeydown);
+    }
+
+    // 削除確認モーダルを閉じる。
+    // Close the delete confirmation modal.
+    function closeDeleteModal() {
+        state.deletingId = null;
+        els.modal.classList.remove('modal--open');
+        document.removeEventListener('keydown', onModalKeydown);
+        // トランジション終了後に hidden にする / hide after the transition ends
+        setTimeout(() => { els.modal.hidden = true; }, 150);
+    }
+
+    // Esc で閉じ、Enter で確定する。
+    // Esc closes, Enter confirms.
+    function onModalKeydown(e) {
+        if (e.key === 'Escape') closeDeleteModal();
+        if (e.key === 'Enter') confirmDelete();
+    }
+
+    // モーダルの「削除する」を確定したときの処理。
+    // Handle confirming deletion in the modal.
+    async function confirmDelete() {
+        const id = state.deletingId;
+        if (id === null) return;
+        clearGlobalError();
+        els.modalConfirm.disabled = true;
 
         try {
             const { ok } = await apiRequest('DELETE', `${API_BASE}/${id}`);
-
             if (!ok) {
                 showGlobalError('削除に失敗しました。 / Failed to delete the task.');
                 return;
             }
-
-            li.remove();
-            els.emptyState.hidden = els.list.children.length > 0;
+            state.todos.delete(id);
+            // 削除対象を編集中だった場合はフォームを戻す。
+            // If we were editing the deleted item, reset the form.
+            if (state.editingId === id) resetForm();
+            renderList();
+            closeDeleteModal();
         } catch (err) {
             showGlobalError('サーバーに接続できませんでした。 / Could not reach the server.');
+        } finally {
+            els.modalConfirm.disabled = false;
         }
     }
 
-    // 初期化: 一覧を読み込み、作成フォームを結線する。
-    // Initialize: load the list and wire the create form.
+    // -------------------------------------------------------------------------
+    // 小さな演出 / small flourishes
+    // -------------------------------------------------------------------------
+
+    // 新規追加されたアイテムを一瞬ハイライトする。
+    // Briefly highlight a newly created item.
+    function flashItem(id) {
+        const li = els.list.querySelector(`.todo[data-id="${id}"]`);
+        if (!li) return;
+        li.classList.add('todo--flash');
+        setTimeout(() => li.classList.remove('todo--flash'), 900);
+    }
+
+    // -------------------------------------------------------------------------
+    // 初期化 / initialization
+    // -------------------------------------------------------------------------
+
     document.addEventListener('DOMContentLoaded', () => {
-        els.createForm.addEventListener('submit', createTodo);
+        els.form.addEventListener('submit', handleSubmit);
+        els.discardBtn.addEventListener('click', resetForm);
+
+        // モーダルの各操作 / modal interactions
+        els.modalCancel.addEventListener('click', closeDeleteModal);
+        els.modalConfirm.addEventListener('click', confirmDelete);
+        els.modal.querySelector('[data-close="true"]').addEventListener('click', closeDeleteModal);
+
         loadTodos();
     });
 })();
