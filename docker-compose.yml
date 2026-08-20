@@ -1,0 +1,57 @@
+# ------------------------------------------------------------------------------
+# ToDo アプリの Docker 構成: app (Laravel + Nginx) と db (MySQL 8)。
+# Docker setup for the ToDo app: app (Laravel + Nginx) and db (MySQL 8).
+# ------------------------------------------------------------------------------
+services:
+  # アプリケーション本体（PHP-FPM + Nginx）。
+  # The application (PHP-FPM + Nginx).
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # ホストの 8000 番をコンテナの 80 番に割り当てる。
+      # Map host port 8000 to container port 80.
+      - "8000:80"
+    environment:
+      # docker-compose の環境変数は .env の値より優先される（Laravel の Dotenv 仕様）。
+      # These env vars take precedence over .env (Laravel's Dotenv behavior).
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: todo_app
+      DB_USERNAME: todo
+      DB_PASSWORD: secret
+    depends_on:
+      db:
+        # db がヘルスチェックを通過してから app を起動する。
+        # Start app only after db passes its health check.
+        condition: service_healthy
+    restart: unless-stopped
+
+  # MySQL 8 データベース。
+  # MySQL 8 database.
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: todo_app
+      MYSQL_USER: todo
+      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: rootsecret
+    ports:
+      # 任意: ホストから DB を確認したい場合に使用する。
+      # Optional: exposed so you can inspect the DB from the host.
+      - "3306:3306"
+    volumes:
+      # データを永続化する名前付きボリューム。
+      # Named volume to persist data.
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootsecret"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  db_data:
