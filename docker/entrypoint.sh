@@ -44,6 +44,12 @@ php artisan migrate --force --seed
 php artisan config:cache
 php artisan route:cache
 
+# 上記コマンドは root で実行されるため、実行時に php-fpm(www-data) が書き込めるよう
+# storage / bootstrap/cache の所有権を戻しておく（ログ書き込み失敗の防止）。
+# The commands above run as root, so hand ownership of storage / bootstrap/cache back to
+# www-data (the php-fpm user) to keep runtime writes — such as logging — working.
+chown -R www-data:www-data storage bootstrap/cache
+
 # 4) supervisor を起動（フォアグラウンド）。
 # 4) Start supervisor in the foreground.
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/app.conf

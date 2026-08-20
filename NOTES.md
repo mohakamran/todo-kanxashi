@@ -17,6 +17,7 @@ The Japanese section is followed by an equivalent English section.
 - **SQL インジェクション対策**: DB アクセスは Eloquent のみ（パラメータバインド）。生 SQL は不使用。
 - **セキュリティヘッダー**: `SecurityHeaders` ミドルウェアで `X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy` を全レスポンスに付与。
 - **入力サイズ制限**: `description` を最大 5000 文字に制限し、過大なペイロードを防ぐ。
+- **既知のフレームワーク勧告**: `composer audit` は Laravel の勧告を 3 件検出する（署名付き URL の混同、`email` バリデーションルールの CRLF インジェクション）。いずれも本アプリの利用機能外（署名付き URL・`email` ルール・メール送信のいずれも未使用）。修正は Laravel 12.60 以降のみで、本課題は Laravel 11.x 固定のため、`composer.json` の `config.audit.ignore` で理由を明記して個別に除外している（新規勧告は引き続きブロックされる）。
 - **本番向け設定**: Nginx で `.env` などの隠しファイルへのアクセスを拒否。デプロイ時は `APP_DEBUG=false` を想定。
 
 ### 保守性 (Maintainability)
@@ -27,7 +28,7 @@ The Japanese section is followed by an equivalent English section.
 - **テスト**: 各エンドポイントの契約を検証するフィーチャーテストを用意（インメモリ SQLite）。
 
 ### なぜバニラ Ajax か (Why vanilla Ajax)
-課題ではフレームワークは任意。バニラ `fetch` はビルドステップが不要で、第三者環境でそのまま動作し、リスクが少ない。求められている「リロードなしの Ajax CRUD」というスキルを直接的に示せるため採用。
+課題ではフレームワークは任意。バニラ `fetch` はビルドステップが不要で、第三者環境でそのまま動作し、リスクが少ない。求められている「リロードなしの Ajax CRUD」というスキルを直接的に示せるため採用。この方針に合わせ、Laravel 標準の Vite/Node ツールチェイン（`package.json`・`vite.config.js` 等）は不要なため削除し、フロントは `public/js`・`public/css` の素の資産のみで構成している（npm ビルド不要）。
 
 ## 2. 判断に迷った点・トレードオフ
 - **完了トグル専用エンドポイント vs 汎用 update**: 「完了/未完了の切替」という意図を URL に明示できる点を重視し、専用の `PATCH /complete` を採用（課題の指定にも合致）。汎用 `update` に寄せる案もあったが意図が不明瞭になる。
@@ -70,6 +71,7 @@ The Japanese section is followed by an equivalent English section.
 - **SQL injection**: all DB access is Eloquent (parameter-bound); no raw SQL.
 - **Security headers**: a `SecurityHeaders` middleware adds `X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` / `Permissions-Policy` to every response.
 - **Input size limit**: `description` is capped at 5000 characters to guard against oversized payloads.
+- **Known framework advisories**: `composer audit` reports 3 Laravel advisories (signed-URL path confusion; CRLF injection in the default `email` validation rule). None are reachable here — the app uses no signed URLs, no `email` rule, and sends no mail. The fixes ship only in Laravel 12.60+, and the stack is pinned to Laravel 11.x, so each is individually excluded with a written reason via `config.audit.ignore` in `composer.json` (any new advisory still blocks).
 - **Production hygiene**: Nginx denies access to hidden files such as `.env`; `APP_DEBUG=false` is expected in deployment.
 
 ### Maintainability
@@ -80,7 +82,7 @@ The Japanese section is followed by an equivalent English section.
 - **Tests**: feature tests verify each endpoint's contract on in-memory SQLite.
 
 ### Why vanilla Ajax
-A framework is optional per the spec. Vanilla `fetch` needs no build step, runs as-is in any third-party environment, and carries less risk, while directly demonstrating the requested "Ajax CRUD without reload" skill.
+A framework is optional per the spec. Vanilla `fetch` needs no build step, runs as-is in any third-party environment, and carries less risk, while directly demonstrating the requested "Ajax CRUD without reload" skill. In line with this, Laravel's default Vite/Node toolchain (`package.json`, `vite.config.js`, etc.) was removed as unnecessary; the frontend is served entirely from plain assets in `public/js` and `public/css` (no npm build).
 
 ## 2. Points of uncertainty & trade-offs
 - **Dedicated complete endpoint vs general update**: chose a dedicated `PATCH /complete` so the intent (toggle done/undone) is explicit in the URL (also matches the spec). Folding it into `update` would blur intent.

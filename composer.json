@@ -1,9 +1,9 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "kamran/todo-app",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "description": "Single-user ToDo list SPA (Laravel 11 JSON API + vanilla-JS Ajax + MySQL).",
+    "keywords": ["laravel", "todo", "spa", "ajax", "mysql"],
     "license": "MIT",
     "require": {
         "php": "^8.2",
@@ -43,13 +43,10 @@
             "@php -r \"file_exists('.env') || copy('.env.example', '.env');\""
         ],
         "post-create-project-cmd": [
-            "@php artisan key:generate --ansi",
-            "@php -r \"file_exists('database/database.sqlite') || touch('database/database.sqlite');\"",
-            "@php artisan migrate --graceful --ansi"
+            "@php artisan key:generate --ansi"
         ],
         "dev": [
-            "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite"
+            "@php artisan serve"
         ]
     },
     "extra": {
@@ -66,7 +63,11 @@
             "php-http/discovery": true
         },
         "audit": {
-            "block-insecure": false
+            "ignore": {
+                "PKSA-3r5d-mb8f-1qw9": "Laravel <12.60 CRLF injection in the default 'email' validation rule. This app uses no 'email' rule and sends no mail; the fix ships only in Laravel 12.60+, and the stack is pinned to Laravel 11.x.",
+                "PKSA-mdq4-51ck-6kdq": "CVE-2026-48019, same CRLF-in-email-rule issue as above. Not reachable: no 'email' rule, no mail.",
+                "PKSA-m5cs-t1y6-qpcs": "Laravel temporary signed URL path confusion. This app defines no signed routes and never calls URL::temporarySignedRoute()."
+            }
         }
     },
     "minimum-stability": "stable",
